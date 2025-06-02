@@ -6,9 +6,10 @@ use futures_util::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    fs::OpenOptions,
+    fs::{create_dir_all, OpenOptions},
     future::{ready, Ready},
     io::Write,
+    path::Path,
     rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -64,6 +65,13 @@ pub struct RequestLoggerConfig {
     pub log_to_console: bool,
     pub log_to_file: bool,
     pub log_file_path: String,
+    pub log_format: LogFormat,
+}
+
+#[derive(Clone)]
+pub enum LogFormat {
+    Text,
+    Json,
 }
 
 impl Default for RequestLoggerConfig {
@@ -71,13 +79,23 @@ impl Default for RequestLoggerConfig {
         Self {
             log_to_console: true,
             log_to_file: false,
-            log_file_path: "requests.log".to_string(),
+            log_file_path: "logs/requests.log".to_string(),
+            log_format: LogFormat::Text,
         }
     }
 }
 
 impl RequestLoggerConfig {
     pub fn from_env() -> Self {
+        let log_format = match env::var("LOG_REQUESTS_FORMAT")
+            .unwrap_or_else(|_| "text".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "json" => LogFormat::Json,
+            _ => LogFormat::Text,
+        };
+
         Self {
             log_to_console: env::var("LOG_REQUESTS_CONSOLE")
                 .unwrap_or_else(|_| "true".to_string())
@@ -88,7 +106,8 @@ impl RequestLoggerConfig {
                 .parse()
                 .unwrap_or(false),
             log_file_path: env::var("LOG_REQUESTS_FILE_PATH")
-                .unwrap_or_else(|_| "requests.log".to_string()),
+                .unwrap_or_else(|_| "logs/requests.log".to_string()),
+            log_format,
         }
     }
 }
@@ -132,6 +151,10 @@ impl RequestLogger {
             log.user_agent.as_deref().unwrap_or("Unknown")
         );
 
+        // Print directly to stdout to ensure it shows up
+        println!("{}", log_message);
+
+        // Also use tracing for structured logging
         match log.status_category {
             StatusCategory::Success => info!("{}", log_message),
             StatusCategory::Redirect => info!("{}", log_message),
@@ -142,24 +165,45 @@ impl RequestLogger {
     }
 
     fn log_to_file(&self, log: &RequestLog) -> std::io::Result<()> {
+        // Create directory if it doesn't exist
+        let file_path = Path::new(&self.config.log_file_path);
+        if let Some(parent_dir) = file_path.parent() {
+            create_dir_all(parent_dir)?;
+        }
+
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.config.log_file_path)?;
 
-        let log_entry = format!(
-            "{} [{}] {} {} {} - {} {}ms [{}->{}] {}\n",
-            log.timestamp,
-            log.status_category.emoji(),
-            log.method,
-            log.uri,
-            log.client_ip,
-            log.status_code,
-            log.response_time_ms,
-            log.request_size,
-            log.response_size,
-            log.user_agent.as_deref().unwrap_or("Unknown")
-        );
+        let log_entry = match self.config.log_format {
+            LogFormat::Json => {
+                // Serialize to JSON
+                match serde_json::to_string(log) {
+                    Ok(json) => format!("{}\n", json),
+                    Err(e) => {
+                        error!("Failed to serialize log to JSON: {}", e);
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Failed to serialize to JSON",
+                        ));
+                    }
+                }
+            }
+            LogFormat::Text => format!(
+                "{} [{}] {} {} {} - {} {}ms [{}->{}] {}\n",
+                log.timestamp,
+                log.status_category.emoji(),
+                log.method,
+                log.uri,
+                log.client_ip,
+                log.status_code,
+                log.response_time_ms,
+                log.request_size,
+                log.response_size,
+                log.user_agent.as_deref().unwrap_or("Unknown")
+            ),
+        };
 
         file.write_all(log_entry.as_bytes())?;
         file.flush()?;
