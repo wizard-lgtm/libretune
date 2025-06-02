@@ -4,12 +4,45 @@ use tokio;
 use tokio::time::Duration;
 use std::env;
 
+use std::sync::LazyLock;
+use surrealdb;
+use surrealdb::Surreal;
+use crate::surrealdb::engine::remote::ws::Client;
+use crate::surrealdb::opt::auth::Root;
+use surrealdb::engine::remote::ws::Ws;
+use surrealdb::Error;
+
 use dotenv::dotenv;
 
 
+mod error {
+    use actix_web::{HttpResponse, ResponseError};
+    use thiserror::Error;
+
+    #[derive(Error, Debug)]
+    pub enum Error {
+        #[error("database error")]
+        Db(String),
+    }
+
+    impl ResponseError for Error {
+        fn error_response(&self) -> HttpResponse {
+            match self {
+                Error::Db(e) => HttpResponse::InternalServerError().body(e.to_string()),
+            }
+        }
+    }
+
+    impl From<surrealdb::Error> for Error {
+        fn from(error: surrealdb::Error) -> Self {
+            eprintln!("{error}");
+            Self::Db(error.to_string())
+        }
+    }
+}
+
 #[get("/")]
 async fn hello() -> impl Responder {
-    tokio::time::sleep(Duration::from_secs(5)).await;
     HttpResponse::Ok().body("Hello world!")
 }
 
@@ -38,6 +71,22 @@ async fn search(params: web::Query<SearchParams>) -> impl Responder {
     HttpResponse::Ok().body(result)
 }
 
+async fn db_connect(db: &LazyLock<Surreal<Client>>) -> Result<(),  surrealdb::Error>{
+
+    db.connect::<Ws>("localhost:8000").await?;
+
+
+    db.signin(Root {
+        username: "root",
+        password: "root",
+    })
+    .await?;
+
+    println!("🚀 Connected to SurrealDB!");
+
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok(); // Load environment variables from `.env`
@@ -47,6 +96,14 @@ async fn main() -> std::io::Result<()> {
     .unwrap_or_else(|_| "8000".to_string())
     .parse::<u16>()
     .expect("PORT must be a number");
+
+
+    static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
+
+    if let Err(e) = db_connect(&DB).await {
+        eprintln!("❌ Failed to connect to SurrealDB: {}", e);
+        std::process::exit(1);
+    } 
 
     println!("🚀 Libretune is running at http://127.0.0.1:{}", port);
 
