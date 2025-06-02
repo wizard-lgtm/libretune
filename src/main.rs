@@ -2,6 +2,10 @@ use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder, Result
 use serde::Deserialize;
 use tokio;
 use tokio::time::Duration;
+use std::env;
+
+use dotenv::dotenv;
+
 
 #[get("/")]
 async fn hello() -> impl Responder {
@@ -36,13 +40,23 @@ async fn search(params: web::Query<SearchParams>) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv().ok(); // Load environment variables from `.env`
+
+    let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("PORT")
+    .unwrap_or_else(|_| "8000".to_string())
+    .parse::<u16>()
+    .expect("PORT must be a number");
+
+    println!("🚀 Libretune is running at http://127.0.0.1:{}", port);
+
     HttpServer::new(|| {
         App::new()
         .service(hello)
         .service(index)
         .service(search)
     })
-    .bind(("127.0.0.1", 8000))?
+    .bind((host.as_str(), port))?
     .run()
     .await
 }
