@@ -1,11 +1,13 @@
 mod db;
+mod types;
+mod logging;
+mod request_logger;
+
 use db::connect_db;
 use actix_web::{get, web, App, HttpResponse, HttpServer, Responder};
 use serde::Deserialize;
 use std::env;
 use dotenv::dotenv;
-mod logging;
-mod request_logger;
 use request_logger::RequestLogger;
 use tracing_actix_web::TracingLogger;
 
@@ -56,7 +58,6 @@ async fn test_status(path: web::Path<u16>) -> impl Responder {
 async fn main() -> std::io::Result<()> {
     dotenv().ok(); // Load environment variables from `.env`
     logging::init(); // Initialize logging
-
     let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("PORT")
         .unwrap_or_else(|_| "8000".to_string())
