@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 actix-web = "4"
+chrono = "0.4.41"
 dotenv = "0.15.0"
 faker_rand = "0.1.1"
 futures-util = "0.3.31"
@@ -17,3 +18,4 @@ tokio = "1.45.1"
 tracing = "0.1.41"
 tracing-actix-web = "0.7.18"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+uuid = "1.17.0"
